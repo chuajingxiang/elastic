@@ -1,0 +1,131 @@
+#Transfer file for installation
+mkdir -p /app/installer
+
+#Transfer with SFTP server
+sftp loginid@SFTPSERVER_IPADDRESS
+get -R /root/ElasticInstallationFiles /app/installer
+
+#Take VM snapshot via vSphere before proceeding.
+
+#install rpm (Elastic,Filebeat,Metricbeat)
+dnf install -y elasticsearch-x.xx.x-x86_64.rpm --disablerepo=*
+dnf install -y metricbeat-x.xx.x-x86_64.rpm filebeat-x.xx.x-x86_64.rpm --disablerepo=*
+
+#Elasticsearch.yml config
+path.data: "/data/es-data"
+path.logs: "/app/es-logs"
+path:
+  repo:
+    - /elastic_nfsrepo1
+    - /elastic_nfsrepo2
+cluster.name: "projectname-elastic-envname"
+node.name: "hostnamenode1"
+network.host: 0.0.0.0
+discovery.seed_hosts:
+  - xx.xx.xx.masternode1
+  - xx.xx.xx.masternode2
+  - xx.xx.xx.masternode3
+node.roles: [data_content,data_warm,remote_cluster_client]
+bootstrap.memory_lock: true
+xpack.http.ssl.certificate_authorities: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.pem"
+xpack.security.audit.enabled: true
+xpack.security.enabled: true
+xpack.security.http.ssl.enabled: true
+xpack.security.http.ssl.certificate_authorities: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.pem"
+xpack.security.http.ssl.certificate: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.pem"
+xpack.security.http.ssl.key: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.key"
+xpack.security.http.ssl.supported_protocols: "TLSv1.3,TLSv1.2"
+xpack.security.http.ssl.verification_mode: "certificate"
+xpack.security.http.ssl.client_authentication: "optional"
+xpack.security.http.ssl.cipher_suites: "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, TLS_RSA_WITH_AES_256_GCM_SHA384, TLS_RSA_WITH_AES_128_GCM_SHA256"
+xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.certificate_authorities: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.pem"
+xpack.security.transport.ssl.certificate: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.pem"
+xpack.security.transport.ssl.key: "/etc/elasticsearch/certs/ssl/loadbalancerdnsname.key"
+xpack.security.transport.ssl.supported_protocols: "TLSv1.3,TLSv1.2"
+xpack.security.transport.ssl.verification_mode: "certificate"
+xpack.security.transport.ssl.cipher_suites: "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, TLS_RSA_WITH_AES_256_GCM_SHA384, TLS_RSA_WITH_AES_128_GCM_SHA256"
+xpack.security.authc.realms:
+  native.native1.order: 0
+xpack.notification.email.html.sanitization.allow: body, head, _tables, _links, _blocks, _formatting, img:embedded, _styles
+
+xpack:
+  security:
+    authc:
+      realms:
+        ldap:
+          ldap1:
+            order: 1
+            url: "ldaps://xx.xx.xx.xx:xxx"
+            bind_dn: "BINDDOMAINNAME_ACCOUNTID"
+            user_search:
+              base_dn: "BASE_DOMAINNAME"
+              filter: "(sAMAccountName={0})"
+            group_search:
+              base_dn: "BASE_DOMAINNAME"
+            files:
+              role_mapping: "role_mapping.yml"
+            unmapped_groups_as_roles: false
+
+
+xpack.notification.email.ssl.verification_mode: none
+xpack.notification.email.account:
+  itswatcheremail_account:
+    profile: standard
+    smtp:
+      auth: false
+      starttls.enable: true
+      host: xx.xx.xx.xx
+      port: 25
+http.max_content_length: 500mb
+
+
+#SSL certs
+mkdir -p /etc/elasticsearch/certs/ssl
+chown root:elasticsearch /etc/elasticsearch/certs/ssl
+/etc/elasticsearch/certs/ssl/es.key
+/etc/elasticsearch/certs/ssl/es.pem
+chown root:elasticsearch /etc/elasticsearch/certs/ssl/*.*
+/usr/share/elasticsearch/bin/elasticsearch-keystore list
+mkdir -p /etc/systemd/system/elasticsearch.service.d
+
+
+vi /etc/systemd/system/elasticsearch.service.d/override.conf
+[Service]
+LimitMEMLOCK=infinity
+Environment="ES_TMPDIR=/app/es-tmp"
+
+##disable swap and save
+systemctl daemon-reload
+swapoff -a
+df -h
+lsmem
+free -h
+
+#check jvm options and value
+/etc/elasticsearch/jvm.options
+/etc/elasticsearch/jvm.options.d/jvm.options
+
+#create logs and tmp folders
+mkdir -p /app/es-logs /app/es-tmp /data/es-data
+chown elasticsearch:elasticsearch /app/es-logs /app/es-tmp /data/es-data
+
+#log4j properties.
+/etc/elasticsearch/log4j2.properties
+
+#update keystore and add ldap password
+/usr/share/elasticsearch/bin/elasticsearch-keystore list
+/usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.http.ssl.keystore.secure_password
+/usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.transport.ssl.keystore.secure_password
+/usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.transport.ssl.truststore.secure_password
+/usr/share/elasticsearch/bin/elasticsearch-keystore add xpack.security.authc.realms.ldap.ldap1.secure_bind_password
+/usr/share/elasticsearch/bin/elasticsearch-keystore show xpack.security.authc.realms.ldap.ldap1.secure_bind_password
+
+
+chmod 755 /etc/elasticsearch/jvm.options.d/jvm.options
+chmod -R 755 /etc/elasticsearch/certs
+
+systemctl enable elasticsearch
+systemctl start elasticsearch
+
+
